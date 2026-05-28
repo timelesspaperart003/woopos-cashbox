@@ -31,6 +31,12 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
   const [activeTab, setActiveTab] = useState<'record' | 'history' | 'report'>('record');
 
   // 今日報表
+  const [showExportPin, setShowExportPin] = useState(false);
+  const [exportPin, setExportPin] = useState('');
+  const [exportPinError, setExportPinError] = useState('');
+  const [isExportPinLoading, setIsExportPinLoading] = useState(false);
+  const [exportFormat, setExportFormat] = useState<'xlsx' | 'csv' | null>(null);
+  const exportPinRef = useRef<HTMLInputElement>(null);
   const [reportDate, setReportDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [reportData, setReportData] = useState<any>(null);
   const [reportLoading, setReportLoading] = useState(false);
@@ -135,6 +141,97 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
       setReportData({ error: '無法連線到錢箱主機' });
     } finally {
       setReportLoading(false);
+    }
+  };
+
+  // exportPin auto focus
+  useEffect(() => {
+    if (showExportPin) setTimeout(() => exportPinRef.current?.focus(), 100);
+  }, [showExportPin]);
+
+  // 匯出：先跳密碼框
+  const handleExport = (format: 'xlsx' | 'csv') => {
+    setExportFormat(format);
+    setExportPin('');
+    setExportPinError('');
+    setShowExportPin(true);
+  };
+
+  // 匯出密碼確認
+  const handleExportPinSubmit = async () => {
+    if (!exportPin.trim()) { setExportPinError('請輸入密碼'); return; }
+    setIsExportPinLoading(true);
+    setExportPinError('');
+    try {
+      const res = await fetch(`${CASHBOX_API_URL}/api/verify-export-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: exportPin })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setShowExportPin(false);
+        setExportPin('');
+        doExport(exportFormat!);
+      } else {
+        setExportPinError(data.error || '密碼錯誤或權限不足');
+        setExportPin('');
+        exportPinRef.current?.focus();
+      }
+    } catch {
+      setExportPinError('無法連線到錢箱主機');
+      setExportPin('');
+    } finally {
+      setIsExportPinLoading(false);
+    }
+  };
+
+  // 實際匯出邏輯
+  const doExport = (format: 'xlsx' | 'csv') => {
+    if (!reportData?.rows?.length) return;
+    const rows = reportData.rows;
+    const headers = ['時間', '操作員', '付款方式', '金額', '備註', '是否訂金', '訂單狀態'];
+    const data = rows.map((r: any) => [
+      r.time, r.operator, r.payment_method,
+      r.order_total, r.note, r.is_deposit, r.order_status
+    ]);
+
+    if (format === 'csv') {
+      const csvContent = [headers, ...data]
+        .map(row => row.map((v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+        .join('
+');
+      const bom = '﻿';
+      const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `POS報表_${reportDate}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      // xlsx：用純 JS 產生簡單格式
+      const escape = (v: any) => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      let xml = `<?xml version="1.0"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="POS報表"><Table>`;
+      const allRows = [headers, ...data];
+      allRows.forEach(row => {
+        xml += '<Row>';
+        row.forEach((cell: any) => {
+          const isNum = typeof cell === 'number' || (!isNaN(Number(cell)) && cell !== '' && cell !== null);
+          xml += isNum
+            ? `<Cell><Data ss:Type="Number">${escape(cell)}</Data></Cell>`
+            : `<Cell><Data ss:Type="String">${escape(cell)}</Data></Cell>`;
+        });
+        xml += '</Row>';
+      });
+      xml += '</Table></Worksheet></Workbook>';
+      const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `POS報表_${reportDate}.xls`;
+      a.click();
+      URL.revokeObjectURL(url);
     }
   };
 
@@ -545,6 +642,18 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
                     ))}
                   </div>
 
+                  {/* 匯出按鈕 */}
+                  <div className="flex gap-2">
+                    <button onClick={() => handleExport('xlsx')} className="flex-1 py-2 text-xs font-bold bg-green-50 border border-green-200 text-green-700 rounded-xl hover:bg-green-100 transition-all flex items-center justify-center gap-1.5">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                      匯出 Excel
+                    </button>
+                    <button onClick={() => handleExport('csv')} className="flex-1 py-2 text-xs font-bold bg-blue-50 border border-blue-200 text-blue-700 rounded-xl hover:bg-blue-100 transition-all flex items-center justify-center gap-1.5">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                      匯出 CSV
+                    </button>
+                  </div>
+
                   {/* A/B 切換 */}
                   <div className="flex bg-gray-100 p-1 rounded-xl">
                     <button
@@ -624,6 +733,36 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
                       )}
                     </div>
                   )}
+
+                  {/* 明細列表 */}
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-black text-gray-500 uppercase tracking-wider px-1 pt-2 border-t border-gray-100">每筆明細</h4>
+                    {(reportData.rows || []).length === 0 ? (
+                      <p className="text-center text-gray-400 text-sm py-4">無明細資料</p>
+                    ) : (
+                      <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                        {/* 表頭 */}
+                        <div className="grid grid-cols-12 gap-1 px-3 py-2 bg-gray-50 border-b border-gray-100 text-[10px] font-black text-gray-400 uppercase">
+                          <span className="col-span-3">時間</span>
+                          <span className="col-span-2">操作員</span>
+                          <span className="col-span-2">付款方式</span>
+                          <span className="col-span-2 text-right">金額</span>
+                          <span className="col-span-3">備註</span>
+                        </div>
+                        {(reportData.rows || []).map((r: any, idx: number) => (
+                          <div key={idx} className="grid grid-cols-12 gap-1 px-3 py-2.5 border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
+                            <span className="col-span-3 text-[10px] text-gray-400 font-mono leading-tight">{r.time?.split(' ')[1] || r.time}</span>
+                            <span className="col-span-2 text-xs font-bold text-gray-700 truncate">{r.operator}</span>
+                            <span className="col-span-2 text-[10px] text-gray-500 truncate leading-tight">{r.payment_method}</span>
+                            <span className={`col-span-2 text-xs font-black text-right ${r.payment_method === '手動出金' ? 'text-red-500' : 'text-green-700'}`}>
+                              {r.payment_method === '手動出金' ? '-' : '+'}${Number(r.order_total).toLocaleString()}
+                            </span>
+                            <span className="col-span-3 text-[10px] text-gray-400 truncate leading-tight">{r.note || '-'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
             </div>
@@ -633,6 +772,58 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
         </div>
       </div>
     </div>
+
+      {/* 匯出密碼 Overlay */}
+      {showExportPin && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+            <div className="bg-indigo-600 px-6 py-4 flex items-center gap-3 text-white">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              <div>
+                <h3 className="text-lg font-bold">管理員驗證</h3>
+                <p className="text-indigo-100 text-xs">匯出報表需要管理員密碼</p>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <input
+                ref={exportPinRef}
+                type="password"
+                value={exportPin}
+                onChange={e => { setExportPin(e.target.value); setExportPinError(''); }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleExportPinSubmit();
+                  if (e.key === 'Escape') { setShowExportPin(false); setExportPin(''); setExportPinError(''); }
+                }}
+                placeholder="輸入管理員密碼"
+                className={`w-full px-4 py-3 text-center text-xl font-bold tracking-widest border-2 rounded-xl outline-none transition-colors ${exportPinError ? 'border-red-400 bg-red-50' : 'border-gray-200 focus:border-indigo-500'}`}
+                disabled={isExportPinLoading}
+                autoComplete="off"
+              />
+              {exportPinError && (
+                <p className="text-sm text-red-600 text-center flex items-center justify-center gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  {exportPinError}
+                </p>
+              )}
+              <div className="flex gap-3">
+                <button onClick={() => { setShowExportPin(false); setExportPin(''); setExportPinError(''); }} disabled={isExportPinLoading} className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors disabled:opacity-50">
+                  取消
+                </button>
+                <button onClick={handleExportPinSubmit} disabled={isExportPinLoading || !exportPin.trim()} className="flex-[2] py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                  {isExportPinLoading
+                    ? <><svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>驗證中...</>
+                    : '確認匯出'
+                  }
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 錢箱密碼 Overlay */}
       {showPin && (
