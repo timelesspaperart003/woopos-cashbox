@@ -4,7 +4,7 @@ import { CartItem, OrderSummary, Customer, OrderStatus, PaymentMethod, Employee 
 import { printOrder } from '../src/lib/printUtils';
 
 // 錢箱 Flask API 位址
-const CASHBOX_API_URL = 'http://10.0.0.21:5000';
+const CASHBOX_API_URL = 'https://cashbox-api.artimelesss.com';
 
 interface CheckoutModalProps {
   isOpen: boolean;
