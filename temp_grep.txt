@@ -1,0 +1,31 @@
+740:           const lineItems = currentCart.map(item => {
+741-             const unitPrice = item.selectedVariation ? parseFloat(item.selectedVariation.price) : parseFloat(item.price);
+742-             const lineTotalBeforeDiscount = unitPrice * item.quantity;
+743-             const discountAmount = item.discount || 0;
+744-             const finalLineTotal = Math.max(0, lineTotalBeforeDiscount - discountAmount);
+745-
+746-             const li: any = {
+747-               name: item.name,
+748-               quantity: item.quantity,
+749-               subtotal: lineTotalBeforeDiscount.toFixed(2),
+750-               total: finalLineTotal.toFixed(2)
+751-             };
+752-
+753-             const cleanId = typeof item.id === 'string' ? parseInt(item.id, 10) : item.id;
+754-             if (cleanId > 0) {
+755-               li.product_id = cleanId;
+756-               if (item.selectedVariation?.id) {
+757-                 const varId = typeof item.selectedVariation.id === 'string' ? parseInt(item.selectedVariation.id, 10) : item.selectedVariation.id;
+758-                 if (varId > 0) {
+759-                   li.variation_id = varId;
+760-                 }
+761-               }
+762-             } else {
+763-               // Omit product_id for custom items
+764-             }
+765-             
+766-             if (item.note) li.meta_data = [{ key: 'note', value: item.note }];
+767-             return li;
+768-           });
+769-
+770-           const feeLines = [];

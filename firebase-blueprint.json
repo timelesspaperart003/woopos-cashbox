@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "order": {
+      "title": "Order",
+      "description": "A POS order synchronized with WooCommerce",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Local or WooCommerce order ID" },
+        "woo_id": { "type": "number", "description": "WooCommerce order ID" },
+        "status": { "type": "string", "enum": ["pending", "processing", "on-hold", "completed", "cancelled", "refunded", "failed"] },
+        "items": { "type": "array", "items": { "type": "object" } },
+        "summary": { "type": "object" },
+        "customer": { "type": "object" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "uid": { "type": "string", "description": "Owner UID" }
+      },
+      "required": ["status", "items", "summary", "timestamp", "uid"]
+    },
+    "setting": {
+      "title": "Settings",
+      "description": "WooCommerce API configuration",
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "consumerKey": { "type": "string" },
+        "consumerSecret": { "type": "string" },
+        "useMockData": { "type": "boolean" },
+        "uid": { "type": "string" },
+        "members": { "type": "array", "items": { "type": "string" }, "description": "Emails of authorized team members" }
+      },
+      "required": ["uid"]
+    },
+    "employee": {
+      "title": "Employee",
+      "description": "Store staff member",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "pin": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "staff"] },
+        "uid": { "type": "string" }
+      },
+      "required": ["name", "pin", "role", "uid"]
+    }
+  },
+  "firestore": {
+    "/orders/{orderId}": {
+      "schema": "order",
+      "description": "Collection of all orders"
+    },
+    "/settings/{userId}": {
+      "schema": "setting",
+      "description": "User-specific WooCommerce settings"
+    },
+    "/employees/{employeeId}": {
+      "schema": "employee",
+      "description": "Collection of store employees"
+    }
+  }
+}

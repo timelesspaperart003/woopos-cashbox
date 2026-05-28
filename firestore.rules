@@ -1,0 +1,123 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isSignedIn() { return request.auth != null; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    function isAdmin() {
+      let adminPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      let email = request.auth.token.get('email', '');
+      let isSystemAdmin = email == "a0102034z@gmail.com" && request.auth.token.get('email_verified', false) == true;
+      return isSignedIn() && (isSystemAdmin || (exists(adminPath) && get(adminPath).data.get('role', '') == 'admin'));
+    }
+    
+    function isMemberOfStore(storeUid) {
+      let settingsPath = /databases/$(database)/documents/settings/$(storeUid);
+      let email = request.auth.token.get('email', '');
+      
+      let settingsDoc = exists(settingsPath) ? get(settingsPath) : null;
+      let members = (settingsDoc != null && 'members' in settingsDoc.data && settingsDoc.data.members is list) 
+                    ? settingsDoc.data.members 
+                    : [];
+      
+      return isSignedIn() && (
+        storeUid == request.auth.uid || 
+        email in members || 
+        email.lower() in members
+      );
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidOrder(data) {
+      return data.get('status', '') is string && data.get('status', '').size() <= 50 &&
+             data.get('items', []) is list &&
+             data.get('summary', {}) is map &&
+             data.get('timestamp', '') is string &&
+             data.get('uid', '') is string;
+    }
+
+    function isValidSetting(data) {
+      return data.get('uid', '') is string &&
+             data.get('uid', '').size() > 0 &&
+             (!('members' in data) || data.members is list) &&
+             (!('storeName' in data) || data.storeName is string) &&
+             (!('cashDrawerBalance' in data) || data.cashDrawerBalance is number);
+    }
+
+    function isValidEmployee(data) {
+      return data.get('name', '') is string && data.get('name', '').size() <= 100 &&
+             data.get('pin', '') is string && data.get('pin', '').size() <= 10 &&
+             data.get('role', '') is string &&
+             data.get('uid', '') is string;
+    }
+
+    function isValidCashTransaction(data) {
+      return data.get('type', '') is string &&
+             data.get('amount', 0) is number &&
+             data.get('timestamp', '') is string &&
+             data.get('uid', '') is string;
+    }
+
+    // ===============================================================
+    // Match Rules
+    // ===============================================================
+
+    match /settings/{userId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && (
+        existing().get('uid', '') == request.auth.uid || 
+        request.auth.token.get('email', '') in existing().get('members', []) ||
+        request.auth.token.get('email', '').lower() in existing().get('members', [])
+      );
+      
+      allow create: if isSignedIn() && userId == request.auth.uid && isValidSetting(incoming());
+      allow update: if isSignedIn() && (
+        userId == request.auth.uid || 
+        isAdmin() || 
+        (isMemberOfStore(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['cashDrawerBalance']))
+      ) && isValidSetting(incoming());
+      allow delete: if isSignedIn() && (userId == request.auth.uid || isAdmin());
+    }
+
+    match /orders/{orderId} {
+      allow read: if isSignedIn() && (isMemberOfStore(existing().get('uid', '')) || isAdmin());
+      allow create: if isSignedIn() && isValidOrder(incoming()) && isMemberOfStore(incoming().get('uid', ''));
+      allow update: if isSignedIn() && (
+        (isMemberOfStore(existing().get('uid', '')) && (!('uid' in incoming()) || incoming().uid == existing().uid)) || 
+        isAdmin()
+      );
+      allow delete: if isSignedIn() && (isMemberOfStore(existing().get('uid', '')) || isAdmin());
+    }
+
+    match /employees/{employeeId} {
+      allow read: if isSignedIn() && (isMemberOfStore(existing().get('uid', '')) || isAdmin());
+      allow create: if isSignedIn() && isValidEmployee(incoming()) && isMemberOfStore(incoming().get('uid', ''));
+      allow update: if isSignedIn() && (
+        (isMemberOfStore(existing().get('uid', '')) && (!('uid' in incoming()) || incoming().uid == existing().uid)) || 
+        isAdmin()
+      );
+      allow delete: if isSignedIn() && (isMemberOfStore(existing().get('uid', '')) || isAdmin());
+    }
+
+    match /cash_transactions/{txId} {
+      allow read: if isSignedIn() && (isMemberOfStore(existing().get('uid', '')) || isAdmin());
+      allow create: if isSignedIn() && isValidCashTransaction(incoming()) && isMemberOfStore(incoming().get('uid', ''));
+      allow update, delete: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "WooPOS AI",
+  "description": "A modern, React-based Point of Sale system for WooCommerce with real-time checkout preview, category filtering, and an AI-powered store assistant.",
+  "requestFramePermissions": []
+}
