@@ -92,7 +92,9 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
     depositAmount: number;
   } | null>(null);
 
-  // Modal 開啟時重設
+  // Modal 開啟/關閉時完整重設所有狀態
+  // ⚠️ 修正：isOpen 變成 false 時也要清 showComplete，
+  //    否則下次開 modal 會直接跳完成畫面
   useEffect(() => {
     if (isOpen) {
       setIsProcessing(false);
@@ -102,6 +104,18 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
       setDepositAmount('');
       setShowComplete(false);
       setCompleteInfo(null);
+      setShowCashboxPin(false);
+      setCashboxPin('');
+      setCashboxError('');
+      pendingCheckout.current = null;
+    } else {
+      // 關閉時也重設，確保下次開啟乾淨
+      setShowComplete(false);
+      setCompleteInfo(null);
+      setShowCashboxPin(false);
+      setCashboxPin('');
+      setCashboxError('');
+      pendingCheckout.current = null;
     }
   }, [isOpen, currentEmployee]);
 
@@ -261,6 +275,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
   };
 
   // ── 完成畫面 ──
+  // 手動按「關閉」才消失，不自動消失
   if (showComplete && completeInfo) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm animate-fade-in">
@@ -308,7 +323,10 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </>
               )}
             </div>
-            <button onClick={onClose} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all">關閉</button>
+            {/* 手動按才關閉，不自動消失 */}
+            <button onClick={onClose} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all">
+              關閉
+            </button>
           </div>
         </div>
       </div>
