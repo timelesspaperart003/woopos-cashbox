@@ -177,6 +177,7 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in p-2 sm:p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] sm:h-[80vh] flex flex-col overflow-hidden">
         {/* Header */}
@@ -480,7 +481,7 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 };
 
