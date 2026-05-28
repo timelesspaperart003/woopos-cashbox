@@ -1,7 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { WCSettings, CashDrawerTransaction, Employee } from '../types';
 import { db, collection, query, where, orderBy, limit, onSnapshot, handleFirestoreError, OperationType } from '../src/firebase';
+
+// 錢箱 Flask API 位址
+const CASHBOX_API_URL = 'https://cashbox-api.artimelesss.com';
 
 interface CashDrawerModalProps {
   isOpen: boolean;
@@ -23,6 +26,15 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
   const [affectsBalance, setAffectsBalance] = useState<boolean>(true);
   const [operatorId, setOperatorId] = useState<string>(currentEmployee?.id || 'owner');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // 同時開箱相關
+  const [openDrawer, setOpenDrawer] = useState(true);
+  const [showPin, setShowPin] = useState(false);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [isPinLoading, setIsPinLoading] = useState(false);
+  const pinInputRef = useRef<HTMLInputElement>(null);
+  const pendingTx = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     if (!isOpen || !settings.uid) return;
@@ -51,6 +63,56 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
     }
   }, [currentEmployee]);
 
+  // 密碼框開啟時 auto focus
+  useEffect(() => {
+    if (showPin) setTimeout(() => pinInputRef.current?.focus(), 100);
+  }, [showPin]);
+
+  // 開箱 API
+  const openCashbox = async (operatorName: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`${CASHBOX_API_URL}/api/open-cashbox`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pin, transaction_id: `drawer-${Date.now()}` })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) return true;
+      setPinError(data.error || data.message || '密碼錯誤，請重試');
+      setPin('');
+      pinInputRef.current?.focus();
+      return false;
+    } catch {
+      setPinError('無法連線到錢箱主機，請確認網路');
+      setPin('');
+      return false;
+    }
+  };
+
+  // 密碼框確認
+  const handlePinSubmit = async () => {
+    if (!pin.trim()) { setPinError('請輸入密碼'); return; }
+    if (!pendingTx.current) return;
+    setIsPinLoading(true);
+    setPinError('');
+    const ok = await openCashbox(operatorName);
+    if (ok) {
+      setShowPin(false);
+      setPin('');
+      await pendingTx.current();
+      pendingTx.current = null;
+    }
+    setIsPinLoading(false);
+  };
+
+  const handlePinCancel = () => {
+    setShowPin(false);
+    setPin('');
+    setPinError('');
+    pendingTx.current = null;
+    setIsSubmitting(false);
+  };
+
   if (!isOpen) return null;
 
   const currentBalance = settings.cashDrawerBalance || 0;
@@ -60,23 +122,36 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
     e.preventDefault();
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) return;
 
-    setIsSubmitting(true);
-    try {
-      await onRecordTransaction({
-        type: type,
-        amount: parseFloat(amount),
-        note: note,
-        operatorId: operatorId,
-        operatorName: operatorName,
-        affectsBalance: affectsBalance
-      });
-      // Reset form
-      setAmount('');
-      setNote('');
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSubmitting(false);
+    // 記帳的實際執行邏輯（密碼驗證後呼叫，或直接呼叫）
+    const doRecord = async () => {
+      setIsSubmitting(true);
+      try {
+        await onRecordTransaction({
+          type: type,
+          amount: parseFloat(amount),
+          note: note,
+          operatorId: operatorId,
+          operatorName: operatorName,
+          affectsBalance: affectsBalance
+        });
+        setAmount('');
+        setNote('');
+        setOpenDrawer(false);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
+    if (openDrawer) {
+      // 需要開箱 → 先跳密碼框，驗證成功後再記帳
+      pendingTx.current = doRecord;
+      setPin('');
+      setPinError('');
+      setShowPin(true);
+    } else {
+      await doRecord();
     }
   };
 
@@ -199,6 +274,24 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
                   className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#009265]/20 focus:border-[#009265] outline-none transition-all text-sm resize-none"
                 />
               </div>
+
+              {/* 同時開箱 checkbox */}
+              <label className="flex items-center gap-3 cursor-pointer p-3 bg-green-50 border border-green-100 rounded-xl hover:bg-green-100 transition-colors">
+                <div className="relative shrink-0">
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={openDrawer}
+                    onChange={e => setOpenDrawer(e.target.checked)}
+                  />
+                  <div className={`w-10 h-5 rounded-full transition-colors ${openDrawer ? 'bg-green-600' : 'bg-gray-200'}`}></div>
+                  <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${openDrawer ? 'translate-x-5' : ''}`}></div>
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-gray-700">同時開啟錢箱</p>
+                  <p className="text-[10px] text-gray-400">需輸入開箱密碼</p>
+                </div>
+              </label>
 
               <button
                 onClick={handleSubmit}
@@ -330,6 +423,63 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
           </div>
         </div>
       </div>
+    </div>
+
+      {/* 錢箱密碼 Overlay */}
+      {showPin && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+            <div className="bg-green-600 px-6 py-4 flex items-center gap-3 text-white">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              <div>
+                <h3 className="text-lg font-bold">錢箱驗證</h3>
+                <p className="text-green-100 text-xs">請輸入開箱密碼以{type === 'in' ? '入金' : '出金'}並開箱</p>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-green-50 border border-green-100 rounded-xl p-3 text-center">
+                <p className="text-xs text-green-700 font-medium">{type === 'in' ? '入金' : '出金'}金額</p>
+                <p className="text-3xl font-black text-green-700">${parseFloat(amount || '0').toLocaleString()}</p>
+                {note && <p className="text-xs text-green-600 mt-1 italic">{note}</p>}
+              </div>
+              <div>
+                <input
+                  ref={pinInputRef}
+                  type="password"
+                  value={pin}
+                  onChange={e => { setPin(e.target.value); setPinError(''); }}
+                  onKeyDown={e => { if (e.key === 'Enter') handlePinSubmit(); if (e.key === 'Escape') handlePinCancel(); }}
+                  placeholder="輸入密碼後按 Enter"
+                  className={`w-full px-4 py-3 text-center text-xl font-bold tracking-widest border-2 rounded-xl outline-none transition-colors ${pinError ? 'border-red-400 bg-red-50' : 'border-gray-200 focus:border-green-500'}`}
+                  disabled={isPinLoading}
+                  autoComplete="off"
+                />
+                {pinError && (
+                  <p className="mt-2 text-sm text-red-600 text-center flex items-center justify-center gap-1">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    {pinError}
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button onClick={handlePinCancel} disabled={isPinLoading} className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors disabled:opacity-50">
+                  取消
+                </button>
+                <button onClick={handlePinSubmit} disabled={isPinLoading || !pin.trim()} className="flex-[2] py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                  {isPinLoading
+                    ? <><svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>開箱中...</>
+                    : <><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" /></svg>確認開箱</>
+                  }
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
