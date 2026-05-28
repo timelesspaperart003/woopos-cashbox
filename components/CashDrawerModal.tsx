@@ -27,6 +27,15 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
   const [operatorId, setOperatorId] = useState<string>(currentEmployee?.id || 'owner');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Tab 切換：'record' | 'history' | 'report'
+  const [activeTab, setActiveTab] = useState<'record' | 'history' | 'report'>('record');
+
+  // 今日報表
+  const [reportDate, setReportDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [reportData, setReportData] = useState<any>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportView, setReportView] = useState<'method' | 'operator'>('method');
+
   // 同時開箱相關
   const [openDrawer, setOpenDrawer] = useState(true);
   const [showPin, setShowPin] = useState(false);
@@ -112,6 +121,27 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
     pendingTx.current = null;
     setIsSubmitting(false);
   };
+
+  // 拉取每日報表
+  const fetchReport = async (date: string) => {
+    setReportLoading(true);
+    setReportData(null);
+    try {
+      const res = await fetch(`${CASHBOX_API_URL}/api/daily-report?date=${date}`);
+      const data = await res.json();
+      if (data.success) setReportData(data);
+      else setReportData({ error: data.error || '載入失敗' });
+    } catch {
+      setReportData({ error: '無法連線到錢箱主機' });
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  // 切換到報表 tab 時自動載入
+  useEffect(() => {
+    if (activeTab === 'report') fetchReport(reportDate);
+  }, [activeTab, reportDate]);
 
   if (!isOpen) return null;
 
@@ -375,13 +405,33 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
             </div>
           </div>
 
-          {/* Right Panel: Transactions */}
+          {/* Right Panel: Tabs */}
           <div className="flex-1 bg-[#f8f9fa] flex flex-col overflow-hidden">
-            <div className="p-4 border-b border-gray-200 bg-white flex items-center justify-between">
-              <h3 className="font-bold text-gray-700">交易紀錄</h3>
-              <span className="text-[10px] text-gray-400 font-bold uppercase ring-1 ring-gray-200 px-2 py-0.5 rounded-full">最近 50 筆</span>
+            {/* Tab Bar */}
+            <div className="bg-white border-b border-gray-200 flex items-center gap-1 px-4 pt-3">
+              {([
+                { key: 'history', label: '交易紀錄' },
+                { key: 'report',  label: '今日報表' },
+              ] as const).map(tab => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`px-4 py-2 text-sm font-bold rounded-t-lg transition-all border-b-2 ${
+                    activeTab === tab.key
+                      ? 'border-[#009265] text-[#009265] bg-green-50'
+                      : 'border-transparent text-gray-400 hover:text-gray-600'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+              {activeTab === 'history' && (
+                <span className="ml-auto text-[10px] text-gray-400 font-bold uppercase ring-1 ring-gray-200 px-2 py-0.5 rounded-full mb-1">最近 50 筆</span>
+              )}
             </div>
             
+            {/* 交易紀錄 Tab */}
+            {activeTab === 'history' && (
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {transactions.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-gray-400 space-y-4 opacity-50">
@@ -441,6 +491,144 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
                 * 點擊右側核取方塊可隨時切換該筆紀錄是否影響錢箱餘額。 (此功能需管理員權限)
               </p>
             </div>
+            )}
+
+            {/* 今日報表 Tab */}
+            {activeTab === 'report' && (
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* 日期選擇 + 重整 */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={reportDate}
+                  onChange={e => setReportDate(e.target.value)}
+                  className="flex-1 px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#009265]"
+                />
+                <button
+                  onClick={() => fetchReport(reportDate)}
+                  disabled={reportLoading}
+                  className="px-3 py-2 bg-[#009265] text-white text-xs font-bold rounded-xl hover:bg-[#007a55] disabled:opacity-50 transition-all"
+                >
+                  {reportLoading ? '載入中...' : '重新整理'}
+                </button>
+              </div>
+
+              {reportLoading && (
+                <div className="flex justify-center items-center py-12 text-gray-400">
+                  <svg className="animate-spin h-8 w-8 mr-3 text-[#009265]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span className="font-bold">載入報表中...</span>
+                </div>
+              )}
+
+              {reportData?.error && (
+                <div className="bg-red-50 border border-red-100 rounded-xl p-4 text-red-600 text-sm font-bold text-center">
+                  ⚠️ {reportData.error}
+                </div>
+              )}
+
+              {reportData?.summary && !reportLoading && (
+                <>
+                  {/* 總覽卡片 */}
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { label: '總收入',   value: '$' + (reportData.summary.total_revenue || 0).toLocaleString(), color: 'text-green-700', bg: 'bg-green-50 border-green-100' },
+                      { label: '總筆數',   value: (reportData.summary.transaction_count || 0) + ' 筆',          color: 'text-blue-700',  bg: 'bg-blue-50 border-blue-100' },
+                      { label: '開箱次數', value: (reportData.summary.open_count || 0) + ' 次',                 color: 'text-amber-700', bg: 'bg-amber-50 border-amber-100' },
+                    ].map(card => (
+                      <div key={card.label} className={`rounded-xl border p-3 text-center ${card.bg}`}>
+                        <p className="text-[10px] text-gray-500 font-bold mb-1">{card.label}</p>
+                        <p className={`text-lg font-black ${card.color}`}>{card.value}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* A/B 切換 */}
+                  <div className="flex bg-gray-100 p-1 rounded-xl">
+                    <button
+                      onClick={() => setReportView('method')}
+                      className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${reportView === 'method' ? 'bg-white text-[#009265] shadow-sm' : 'text-gray-500'}`}
+                    >
+                      依付款方式
+                    </button>
+                    <button
+                      onClick={() => setReportView('operator')}
+                      className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${reportView === 'operator' ? 'bg-white text-[#009265] shadow-sm' : 'text-gray-500'}`}
+                    >
+                      依操作員
+                    </button>
+                  </div>
+
+                  {/* 依付款方式 */}
+                  {reportView === 'method' && (
+                    <div className="space-y-2">
+                      {Object.entries(reportData.summary.by_method || {}).map(([method, data]: [string, any]) => (
+                        <div key={method} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                          <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+                            <span className="text-sm font-black text-gray-800">{method}</span>
+                            <div className="text-right">
+                              <span className="text-sm font-black text-green-700">${(data.total || 0).toLocaleString()}</span>
+                              <span className="text-[10px] text-gray-400 ml-2">{data.count} 筆</span>
+                            </div>
+                          </div>
+                          {Object.entries(data.operators || {}).map(([op, opData]: [string, any]) => (
+                            <div key={op} className="flex items-center justify-between px-4 py-2 border-b border-gray-50 last:border-0">
+                              <span className="text-xs text-gray-600 flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#009265] inline-block"></span>
+                                {op}
+                              </span>
+                              <div className="text-right">
+                                <span className="text-xs font-bold text-gray-700">${(opData.total || 0).toLocaleString()}</span>
+                                <span className="text-[10px] text-gray-400 ml-1.5">{opData.count} 筆</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                      {Object.keys(reportData.summary.by_method || {}).length === 0 && (
+                        <p className="text-center text-gray-400 text-sm py-8">今日尚無交易紀錄</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 依操作員 */}
+                  {reportView === 'operator' && (
+                    <div className="space-y-2">
+                      {Object.entries(reportData.summary.by_operator || {}).map(([op, data]: [string, any]) => (
+                        <div key={op} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                          <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+                            <span className="text-sm font-black text-gray-800">{op}</span>
+                            <div className="text-right">
+                              <span className="text-sm font-black text-green-700">${(data.total || 0).toLocaleString()}</span>
+                              <span className="text-[10px] text-gray-400 ml-2">{data.count} 筆</span>
+                            </div>
+                          </div>
+                          {Object.entries(data.methods || {}).map(([method, mData]: [string, any]) => (
+                            <div key={method} className="flex items-center justify-between px-4 py-2 border-b border-gray-50 last:border-0">
+                              <span className="text-xs text-gray-600 flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span>
+                                {method}
+                              </span>
+                              <div className="text-right">
+                                <span className="text-xs font-bold text-gray-700">${(mData.total || 0).toLocaleString()}</span>
+                                <span className="text-[10px] text-gray-400 ml-1.5">{mData.count} 筆</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                      {Object.keys(reportData.summary.by_operator || {}).length === 0 && (
+                        <p className="text-center text-gray-400 text-sm py-8">今日尚無交易紀錄</p>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            )}
+
           </div>
         </div>
       </div>
