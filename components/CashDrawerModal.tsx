@@ -134,6 +134,26 @@ const CashDrawerModal: React.FC<CashDrawerModalProps> = ({
           operatorName: operatorName,
           affectsBalance: affectsBalance
         });
+        // 同步寫入 GAS POS交易記錄 Sheet
+        try {
+          await fetch(`${CASHBOX_API_URL}/api/log-pos-transaction`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              order_id: `drawer-${Date.now()}`,
+              operator_name: operatorName,
+              payment_method: type === 'in' ? 'cash_drawer_in' : 'cash_drawer_out',
+              order_total: parseFloat(amount),
+              received: parseFloat(amount),
+              change: 0,
+              is_deposit: false,
+              note: note || (type === 'in' ? '手動入金' : '手動出金'),
+              order_status: 'completed',
+            })
+          });
+        } catch (e) {
+          console.warn('GAS 記錄失敗（不影響記帳）:', e);
+        }
         setAmount('');
         setNote('');
         setOpenDrawer(false);
