@@ -639,7 +639,6 @@ const App: React.FC = () => {
   };
 
   const handleConfirmOrder = async (status: OrderStatus, paymentMethod: PaymentMethod, employee: Employee) => {
-    // Modal 關閉由 CheckoutModal 完成畫面的「關閉」按鈕控制，不在這裡強制關閉
     try {
       if (!checkoutSummary || !user || !activeStoreUid) {
         throw new Error("遺失商店資訊或登入逾時，請重新整理頁面。");
@@ -705,8 +704,9 @@ const App: React.FC = () => {
         setCurrentSessionId(nextId);
       }
 
-    // D. BACKGROUND PROCESSING
-    (async () => {
+    // D. SYNC PROCESSING - 等待完成後再 resolve，讓 CheckoutModal 正確顯示完成畫面
+    setIsCheckoutOpen(false);
+    await (async () => {
       let currentOrderId = tempId;
       try {
         // A. Initial Save to Firestore
